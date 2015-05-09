@@ -25,7 +25,7 @@ enum action_set{
     NAA,
 };
 const float crit_rate = 0.3f;
-const float discounting_factor = 0.95;
+const float discounting_factor = 0.995;
 const float error_tolerance = 0.05;
 
 int validate_state(state_t state){
