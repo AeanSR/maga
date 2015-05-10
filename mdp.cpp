@@ -1,8 +1,8 @@
 #include <cstdio>
 #include <cstring>
 typedef union{
-    unsigned key;
-    struct{
+    unsigned key; /* Used as a array index. */
+    struct{ /* State Space */
         unsigned gcd : 1;
         unsigned rb_st : 2;
         unsigned bs_st : 2;
@@ -13,21 +13,21 @@ typedef union{
 } state_t;
 
 #define STATE_SPACE (1 << (1+2+2+4+3+7))
-float v[STATE_SPACE];
-float vnext[STATE_SPACE];
-unsigned pi[STATE_SPACE];
+double v[STATE_SPACE];     /* Uk(s) */
+double vnext[STATE_SPACE]; /* Uk+1(s) */
+unsigned pi[STATE_SPACE]; /* store the optimal policy. */
 
-enum action_set{
+enum action_set{ /* Action Space */
     wait,
     bt,
     rb,
     ws,
     NAA,
 };
-const float crit_rate = 0.3f;
-const float discounting_factor = 0.995;
-const float error_tolerance = 0.05;
+const double crit_rate = 0.3; /* crit rate in game. */
+const double error_tolerance = 0.001; /* error tolerance. */
 
+/* Check if `state` is a valid state. */
 int validate_state(state_t state){
     if (state.state.rb_st > 2) return 0;
     if (state.state.bs_st > 2) return 0;
@@ -37,6 +37,7 @@ int validate_state(state_t state){
     return 1;
 }
 
+/* Return available action set As on `state`, as a bit mask. */
 unsigned get_available_actions(state_t state){
     unsigned mask = 1; /* You can always wait. */
     if (state.state.gcd) return mask;
@@ -46,11 +47,15 @@ unsigned get_available_actions(state_t state){
     return mask;
 }
 
-void value_update(state_t os){
+/* Bellman equation. */
+void value_update(state_t os, int k){
     state_t ns;
-    float this_action_reward;
-    float instant_reward;
-    float best_action_reward = -1;
+    double this_action_reward;
+    double instant_reward;
+    double best_action_reward = -1;
+    double discounting_factor_v = (double)k / (double)(k+1);
+    double discounting_factor_i = 1.0 / (k+1);
+
     unsigned best_action = NAA;
     unsigned available_actions = get_available_actions(os);
     for(unsigned action = wait; action != NAA; action++){
@@ -67,7 +72,7 @@ void value_update(state_t os){
             if(ns.state.bt_cd) ns.state.bt_cd --;
             if(ns.state.rage >= 116) ns.state.rage = 120;
             else ns.state.rage += 4;
-            this_action_reward += discounting_factor * v[ns.key];
+            this_action_reward += discounting_factor_v * v[ns.key];
         break;
         case bt:
             /* none crit, none bs */
@@ -77,21 +82,22 @@ void value_update(state_t os){
             ns.state.bt_cd = 5;
             if(ns.state.rage >= 106) ns.state.rage = 120;
             else ns.state.rage += 14;
-            this_action_reward += 0.8f * (1.0 - crit_rate) * (instant_reward + discounting_factor * v[ns.key]);
+            this_action_reward += 0.8 * (1.0 - crit_rate) * (discounting_factor_i * instant_reward + discounting_factor_v * v[ns.key]);
             /* none crit, bs */
             t = ns.state.bs_st;
             ns.state.bs_st = 2;
-            this_action_reward += 0.2f * (1.0 - crit_rate) * (instant_reward + discounting_factor * v[ns.key]);
+            this_action_reward += 0.2 * (1.0 - crit_rate) * (discounting_factor_i * instant_reward + discounting_factor_v * v[ns.key]);
             /* crit, none bs */
             ns.state.bs_st = t;
             instant_reward *= 2;
             if(ns.state.rage >= 110) ns.state.rage = 120;
             else ns.state.rage += 10;
+            ns.state.rb_st = ns.state.rb_st == 2 ? 2 : ns.state.rb_st+1;
             ns.state.er_rm = 9;
-            this_action_reward += 0.8f * (crit_rate) * (instant_reward + discounting_factor * v[ns.key]);
+            this_action_reward += 0.8 * (crit_rate) * (discounting_factor_i * instant_reward + discounting_factor_v * v[ns.key]);
             /* crit and bs */
             ns.state.bs_st = 2;
-            this_action_reward += 0.2f * (crit_rate) * (instant_reward + discounting_factor * v[ns.key]);
+            this_action_reward += 0.2 * (crit_rate) * (discounting_factor_i * instant_reward + discounting_factor_v * v[ns.key]);
         break;
         case rb:
             instant_reward = 325.0 * (ns.state.er_rm ? 1.4 : 1.0);
@@ -101,7 +107,7 @@ void value_update(state_t os){
             if(ns.state.bt_cd) ns.state.bt_cd --;
             ns.state.rage -= 6;
             ns.state.rb_st --;
-            this_action_reward += instant_reward + discounting_factor * v[ns.key];
+            this_action_reward += discounting_factor_i * instant_reward + discounting_factor_v * v[ns.key];
         break;
         case ws:
             instant_reward = 234.375 * (ns.state.er_rm ? 1.4 : 1.0);
@@ -116,7 +122,7 @@ void value_update(state_t os){
                 /* Pure */
                 ns.state.rage -= 16;
             }
-            this_action_reward += instant_reward + discounting_factor * v[ns.key];
+            this_action_reward += discounting_factor_i * instant_reward + discounting_factor_v * v[ns.key];
         break;
         }
 
@@ -129,17 +135,19 @@ void value_update(state_t os){
     vnext[os.key] = best_action_reward;
 }
 
+void demo();
+
 int main(){
     int converge = 0;
-    int i = 1;
+    int k = 0;
     while(!converge){
-        printf("Value Iteration %d ...", i++);
+        printf("Value Iteration %d ...", k++);
         converge = 1;
-        for(unsigned k = 0; k < STATE_SPACE; k++){
+        for(unsigned i = 0; i < STATE_SPACE; i++){
             state_t state;
-            state.key = k;
+            state.key = i;
             if(!validate_state(state)) continue;
-            value_update(state);
+            value_update(state, k);
             if(vnext[state.key] - v[state.key] > error_tolerance || vnext[state.key] - v[state.key] < -error_tolerance) converge = 0;
         }
         printf("\b\b\b\n");
@@ -158,4 +166,6 @@ int main(){
                 state.state.rb_st, state.state.bs_st, state.state.er_rm, state.state.bt_cd, state.state.rage,
                 action_name[pi[state.key]], v[state.key]);
     }
+
+    demo();
 }
